@@ -1,8 +1,9 @@
-import { Effect, TestClock } from "effect";
+import { Effect } from "effect";
+import { TestClock } from "effect/testing";
 import { describe, it, expect, yieldFibers } from "../src/index.js";
 
 describe("effect-bun-test", () => {
-  it.effect("it.effect runs with TestContext", () =>
+  it.effect("it.effect runs with TestClock", () =>
     Effect.gen(function* () {
       const before = yield* Effect.clockWith((clock) => clock.currentTimeMillis);
       yield* TestClock.adjust("1 second");
@@ -35,7 +36,7 @@ describe("effect-bun-test", () => {
   it.effect("yieldFibers allows forked effects to run", () =>
     Effect.gen(function* () {
       let ran = false;
-      yield* Effect.fork(
+      yield* Effect.forkChild(
         Effect.sync(() => {
           ran = true;
         }),

@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "effect": ["./node_modules/effect-v3"],
+      "effect/*": ["./node_modules/effect-v3/*"]
+    }
+  },
+  "include": ["src-v3"],
+  "exclude": ["node_modules"]
+}
