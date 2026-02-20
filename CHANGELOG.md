@@ -1,5 +1,11 @@
 # effect-bun-test
 
+## 0.2.1
+
+### Patch Changes
+
+- [`e8fad2c`](https://github.com/cevr/effect-bun-test/commit/e8fad2c7320d814f557b050c5c4ba94cb08ad9a5) Thanks [@cevr](https://github.com/cevr)! - Move effect from dependencies to devDependencies to prevent nested copies conflicting with consumer's effect version
+
 ## 0.2.0
 
 ### Minor Changes
