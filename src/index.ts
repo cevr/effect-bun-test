@@ -26,13 +26,22 @@
  *       yield* Effect.sleep("10 millis");
  *     })
  *   );
+ *
+ *   // Layer variants — pre-provide a layer to all tests
+ *   const test = it.live.layer(MyService.Test());
+ *   test("creates something", () =>
+ *     Effect.gen(function* () {
+ *       const svc = yield* MyService;
+ *       // layer is automatically provided
+ *     })
+ *   );
  * });
  * ```
  *
  * @module
  */
 import type { Scope } from "effect";
-import { Effect } from "effect";
+import { Effect, Layer } from "effect";
 import type { TestClock } from "effect/testing";
 import { TestClock as TestClockImpl } from "effect/testing";
 import { describe as bunDescribe, expect, test as bunTest } from "bun:test";
@@ -46,8 +55,18 @@ type TestEnv = TestClock.TestClock;
  */
 export const yieldFibers = Effect.yieldNow.pipe(Effect.repeat({ times: 9 }));
 
+/** Test function returned by `.layer()` */
+type LayeredTest<R> = <E>(
+  name: string,
+  fn: () => Effect.Effect<void, E, R>,
+  timeout?: number,
+) => void;
+
 /**
  * Effect-aware test helpers.
+ *
+ * Each variant has a `.layer(layer)` method that returns a test function
+ * with the layer pre-provided — eliminating per-test `.pipe(Effect.provide(layer))`.
  *
  * - `it.effect` - Run with TestClock
  * - `it.scoped` - Run scoped effect with TestClock
@@ -59,41 +78,87 @@ export const it = {
    * Run effect with TestClock.
    * Use for tests that need time control.
    */
-  effect: <E>(name: string, fn: () => Effect.Effect<void, E, TestEnv>, timeout?: number) =>
-    bunTest(
-      name,
-      () => Effect.runPromise(fn().pipe(Effect.scoped, Effect.provide(TestClockImpl.layer()))),
-      timeout,
-    ),
+  effect: Object.assign(
+    <E>(name: string, fn: () => Effect.Effect<void, E, TestEnv>, timeout?: number) =>
+      bunTest(
+        name,
+        () => Effect.runPromise(fn().pipe(Effect.scoped, Effect.provide(TestClockImpl.layer()))),
+        timeout,
+      ),
+    {
+      layer:
+        <ROut, EL>(layer: Layer.Layer<ROut, EL>): LayeredTest<ROut | TestEnv> =>
+        (name, fn, timeout) =>
+          bunTest(
+            name,
+            () =>
+              Effect.runPromise(
+                fn().pipe(Effect.scoped, Effect.provide(Layer.merge(TestClockImpl.layer(), layer))),
+              ),
+            timeout,
+          ),
+    },
+  ),
 
   /**
    * Run scoped effect with TestClock.
    * Use for tests with resources that need cleanup.
    */
-  scoped: <E>(
-    name: string,
-    fn: () => Effect.Effect<void, E, TestEnv | Scope.Scope>,
-    timeout?: number,
-  ) =>
-    bunTest(
-      name,
-      () => Effect.runPromise(fn().pipe(Effect.scoped, Effect.provide(TestClockImpl.layer()))),
-      timeout,
-    ),
+  scoped: Object.assign(
+    <E>(name: string, fn: () => Effect.Effect<void, E, TestEnv | Scope.Scope>, timeout?: number) =>
+      bunTest(
+        name,
+        () => Effect.runPromise(fn().pipe(Effect.scoped, Effect.provide(TestClockImpl.layer()))),
+        timeout,
+      ),
+    {
+      layer:
+        <ROut, EL>(layer: Layer.Layer<ROut, EL>): LayeredTest<ROut | TestEnv | Scope.Scope> =>
+        (name, fn, timeout) =>
+          bunTest(
+            name,
+            () =>
+              Effect.runPromise(
+                fn().pipe(Effect.scoped, Effect.provide(Layer.merge(TestClockImpl.layer(), layer))),
+              ),
+            timeout,
+          ),
+    },
+  ),
 
   /**
    * Run effect with real clock (no TestClock).
    * Use for tests that need actual time delays.
    */
-  live: <E>(name: string, fn: () => Effect.Effect<void, E, never>, timeout?: number) =>
-    bunTest(name, () => Effect.runPromise(fn()), timeout),
+  live: Object.assign(
+    <E>(name: string, fn: () => Effect.Effect<void, E, never>, timeout?: number) =>
+      bunTest(name, () => Effect.runPromise(fn()), timeout),
+    {
+      layer:
+        <ROut, EL>(layer: Layer.Layer<ROut, EL>): LayeredTest<ROut> =>
+        (name, fn, timeout) =>
+          bunTest(name, () => Effect.runPromise(fn().pipe(Effect.provide(layer))), timeout),
+    },
+  ),
 
   /**
    * Run scoped effect with real clock.
    * Use for tests with resources that need real time.
    */
-  scopedLive: <E>(name: string, fn: () => Effect.Effect<void, E, Scope.Scope>, timeout?: number) =>
-    bunTest(name, () => Effect.runPromise(fn().pipe(Effect.scoped)), timeout),
+  scopedLive: Object.assign(
+    <E>(name: string, fn: () => Effect.Effect<void, E, Scope.Scope>, timeout?: number) =>
+      bunTest(name, () => Effect.runPromise(fn().pipe(Effect.scoped)), timeout),
+    {
+      layer:
+        <ROut, EL>(layer: Layer.Layer<ROut, EL>): LayeredTest<ROut | Scope.Scope> =>
+        (name, fn, timeout) =>
+          bunTest(
+            name,
+            () => Effect.runPromise(fn().pipe(Effect.scoped, Effect.provide(layer))),
+            timeout,
+          ),
+    },
+  ),
 };
 
 /** Re-export bun:test primitives */
