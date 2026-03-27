@@ -1,5 +1,11 @@
 # effect-bun-test
 
+## 0.3.0
+
+### Minor Changes
+
+- [`847b440`](https://github.com/cevr/effect-bun-test/commit/847b4402d263be276659338eddd7873e53bfe7b7) Thanks [@cevr](https://github.com/cevr)! - Add `.layer()` method to all `it` variants (`it.live.layer`, `it.effect.layer`, `it.scoped.layer`, `it.scopedLive.layer`). Returns a test function with the layer pre-provided, eliminating per-test `.pipe(Effect.provide(layer))` boilerplate.
+
 ## 0.2.1
 
 ### Patch Changes
