@@ -1,4 +1,4 @@
-import { Effect, Layer, ServiceMap } from "effect";
+import { Context, Effect, Layer } from "effect";
 import { TestClock } from "effect/testing";
 import { describe, it, expect, yieldFibers } from "../src/index.js";
 
@@ -53,7 +53,9 @@ interface CounterService {
   readonly count: Effect.Effect<number>;
 }
 
-class Counter extends ServiceMap.Service<Counter, CounterService>()("test/Counter") {
+class Counter extends Context.Service<Counter, CounterService>()(
+  "effect-bun-test/test/index.test/Counter",
+) {
   static Test = () => Layer.succeed(Counter, Counter.of({ count: Effect.succeed(42) }));
 }
 
@@ -134,7 +136,9 @@ describe("merged layers", () => {
     readonly log: (msg: string) => Effect.Effect<void>;
   }
 
-  class Logger extends ServiceMap.Service<Logger, LoggerService>()("test/Logger") {
+  class Logger extends Context.Service<Logger, LoggerService>()(
+    "effect-bun-test/test/index.test/Logger",
+  ) {
     static Test = () => Layer.succeed(Logger, Logger.of({ log: () => Effect.void }));
   }
 
