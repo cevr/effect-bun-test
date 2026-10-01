@@ -1,5 +1,11 @@
 # effect-bun-test
 
+## 0.4.0
+
+### Minor Changes
+
+- [`553bc47`](https://github.com/cevr/effect-bun-test/commit/553bc47ada7674db0fe1dd61b9a3fad936b8b80b) Thanks [@cevr](https://github.com/cevr)! - Requires Effect 4.0.0 for the default (v4) entry; the `effect-bun-test/v3` entry still supports Effect 3.19+. The peer range is now `^3.19.0 || ^4.0.0`.
+
 ## 0.3.0
 
 ### Minor Changes
