@@ -4,7 +4,7 @@
 // out; the case after each says it ran. Each says it on stderr, where bun
 // reports, so the order of the two reads in one stream.
 import { Effect } from "effect";
-import { describe, it } from "../../src/index.js";
+import { describe, it } from "./entry.js";
 
 const say = (line: string) => Effect.sync(() => console.error(line));
 

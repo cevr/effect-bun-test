@@ -1,41 +1,130 @@
+// Each fixture runs as a `bun test` of its own (`bun test` finds no
+// `*.test.ts` in `test/fixtures`, so the suite does not run them directly),
+// against both entries: `src` on Effect 4, and `src-v3` on Effect 3.
 import { describe, expect, test } from "bun:test";
 
-/** The lines a run of the fixture printed that tell the order of things. */
-const ordered = (output: string) =>
-  output
+const fixtures = `${import.meta.dir}/fixtures`;
+
+const ENTRIES = ["v4", "v3"] as const;
+type Entry = (typeof ENTRIES)[number];
+
+/** Run one fixture; answer its exit code and its stderr's lines, cleaned. */
+const run = async (
+  entry: Entry,
+  path: string,
+  options: { readonly dir?: string; readonly args?: ReadonlyArray<string> } = {},
+) => {
+  const child = Bun.spawn(
+    [
+      "bun",
+      "test",
+      ...(entry === "v3" ? ["--preload", `${fixtures}/effect-v3.ts`] : []),
+      ...(options.args ?? []),
+      path,
+    ],
+    {
+      cwd: options.dir === undefined ? fixtures : `${fixtures}/${options.dir}`,
+      env: { ...process.env, EFFECT_BUN_TEST_ENTRY: entry },
+      stdout: "pipe",
+      stderr: "pipe",
+    },
+  );
+  // bun reports on stderr, where the fixtures say what they did too.
+  const [stderr, exitCode] = await Promise.all([new Response(child.stderr).text(), child.exited]);
+  const lines = stderr
     .split("\n")
     // oxlint-disable-next-line no-control-regex -- bun colours its report
     .map((line) => line.replace(/\u001b\[[0-9;]*m/g, "").trim())
-    .filter((line) => /^(acquired|released|ran after) |^\(fail\) |^# Unhandled/.test(line))
     .map((line) => line.replace(/ \[[\d.]+m?s\]$/, ""));
+  const count = (word: string) =>
+    Number(lines.find((line) => line.endsWith(` ${word}`))?.split(" ")[0] ?? 0);
+  return {
+    exitCode,
+    lines,
+    /** The lines that tell the order of things. */
+    ordered: lines.filter((line) => /^(acquired|released|ran after) |^\(fail\) /.test(line)),
+    failed: lines.filter((line) => line.startsWith("(fail) ")).sort(),
+    passed: count("pass"),
+    released: lines.find((line) => line.startsWith("released by then:")),
+    /** A runner refused, or an error bun saw between tests. */
+    broken: lines.filter((line) => /Cannot call onTestFinished|^# Unhandled/.test(line)),
+  };
+};
 
-describe("a test bun times out", () => {
-  test("is interrupted, its finalizers run before the next test starts, and nothing fails after it", () => {
-    const run = Bun.spawnSync(["bun", "test", "./test/fixtures/times-out.ts"], {
-      cwd: `${import.meta.dir}/..`,
-      stdout: "pipe",
-      stderr: "pipe",
+const timedOut = (group: string) =>
+  ["default", "effect", "live", "scoped", "scopedLive"].map((name) => `(fail) ${group} > ${name}`);
+
+const ALL_RELEASED = "released by then: default effect live scoped scopedLive";
+
+for (const entry of ENTRIES)
+  describe.concurrent(`on the ${entry} entry`, () => {
+    test("a test bun times out is interrupted, its finalizers run before the next test starts, and nothing fails after it", async () => {
+      const result = await run(entry, "./times-out.ts");
+      expect(result.exitCode).toBe(1);
+      expect(result.ordered).toEqual(
+        ["scoped", "effect", "scopedLive", "live"].flatMap((name) => [
+          `acquired ${name}`,
+          `released ${name}`,
+          `(fail) a test bun times out > ${name}`,
+          `ran after ${name}`,
+        ]),
+      );
+      expect(result.broken).toEqual([]);
     });
-    // bun reports on stderr, where the fixture says what it did too.
-    const output = run.stderr.toString();
-    expect(run.exitCode).toBe(1);
-    expect(ordered(output)).toEqual([
-      "acquired scoped",
-      "released scoped",
-      "(fail) a test bun times out > scoped",
-      "ran after scoped",
-      "acquired effect",
-      "released effect",
-      "(fail) a test bun times out > effect",
-      "ran after effect",
-      "acquired scopedLive",
-      "released scopedLive",
-      "(fail) a test bun times out > scopedLive",
-      "ran after scopedLive",
-      "acquired live",
-      "released live",
-      "(fail) a test bun times out > live",
-      "ran after live",
-    ]);
+
+    test("every runner passes in a file bun runs concurrently, and a failure still fails", async () => {
+      const result = await run(entry, "./passes.ts", { dir: "concurrent" });
+      expect(result.broken).toEqual([]);
+      expect(result.failed).toEqual(["(fail) a concurrent test > fails"]);
+      expect(result.passed).toBe(8);
+      expect(result.lines).toContain("released scoped");
+      expect(result.lines).toContain("released scopedLive");
+    });
+
+    test("a concurrent test bun times out under the runner's deadline is interrupted, and its finalizers run while the file still runs", async () => {
+      const result = await run(entry, "./times-out.ts", { dir: "concurrent" });
+      expect(result.broken).toEqual([]);
+      expect(result.failed).toEqual(timedOut("a concurrent test bun times out"));
+      expect(result.released).toBe(ALL_RELEASED);
+      expect(result.passed).toBe(1);
+    });
+
+    test("a concurrent test under bun's --timeout alone runs on as it did in 0.4.0", async () => {
+      const result = await run(entry, "./no-deadline.ts", {
+        dir: "concurrent",
+        args: ["--timeout", "200"],
+      });
+      expect(result.broken).toEqual([]);
+      expect(result.failed).toEqual([
+        "(fail) a concurrent test with no deadline the runner holds > scoped",
+      ]);
+      expect(result.released).toBe("released by then:");
+      expect(result.passed).toBe(1);
+    });
+
+    test("a runner's .serial form in a concurrent file runs alone: interrupted, its finalizers run before the next test starts", async () => {
+      const result = await run(entry, "./serial.ts", { dir: "concurrent" });
+      expect(result.broken).toEqual([]);
+      expect(result.ordered).toEqual(
+        ["scoped", "effect", "scopedLive", "live"].flatMap((name) => [
+          `acquired ${name}`,
+          `released ${name}`,
+          `(fail) a serial test in a concurrent file > ${name}`,
+          `ran after ${name}`,
+        ]),
+      );
+    });
+
+    test("every runner passes and times out in a describe.concurrent block as in a concurrent file", async () => {
+      const result = await run(entry, "./describe-concurrent.ts");
+      expect(result.broken).toEqual([]);
+      expect(result.failed).toEqual(
+        [
+          "(fail) passing in describe.concurrent > fails",
+          ...timedOut("timed out in describe.concurrent"),
+        ].sort(),
+      );
+      expect(result.released).toBe(ALL_RELEASED);
+      expect(result.passed).toBe(9);
+    });
   });
-});
