@@ -1,0 +1,4 @@
+# Every fixture here runs its tests concurrently, as a consumer's
+# `concurrentTestGlob` makes its browser tests run.
+[test]
+concurrentTestGlob = ["**/*.ts"]
