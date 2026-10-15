@@ -2,14 +2,20 @@
 // no `*.test.ts` here, so the suite does not run it directly). Each case
 // takes a resource whose release says so, then never ends, so bun times it
 // out; the case after each says it ran. Each says it on stderr, where bun
-// reports, so the order of the two reads in one stream.
+// reports, so the order of the two reads in one stream. A release takes
+// 50 ms of real time, so bun is seen to wait for asynchronous cleanup.
 import { Effect } from "effect";
 import { describe, it } from "./entry.js";
 
 const say = (line: string) => Effect.sync(() => console.error(line));
 
 const held = (name: string) =>
-  Effect.acquireRelease(say(`acquired ${name}`), () => say(`released ${name}`));
+  Effect.acquireRelease(say(`acquired ${name}`), () =>
+    Effect.andThen(
+      Effect.promise(() => Bun.sleep(50)),
+      say(`released ${name}`),
+    ),
+  );
 
 describe("a test bun times out", () => {
   it.scoped("scoped", () => Effect.andThen(held("scoped"), Effect.never), 200);

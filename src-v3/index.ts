@@ -56,11 +56,18 @@ type TestEnv = TestServices.TestServices;
 let defaultTimeout: number | undefined;
 
 /**
- * Set the default timeout, in milliseconds, of the tests registered after it:
- * bun's own (`setDefaultTimeout` from `bun:test`), and the deadline the
- * runners hold, at which they interrupt a concurrent test. Use it in place of
- * bun's `--timeout`, which a test cannot read: in a preload, or at the top of
- * a file.
+ * Set the default timeout, in milliseconds, of the tests registered after it.
+ * It sets two things that last differently:
+ *
+ * - the deadline the runners hold, at which they interrupt a concurrent test,
+ *   for the rest of the process;
+ * - bun's own default (`setDefaultTimeout` from `bun:test`), which bun keeps
+ *   for the current file only, then resets.
+ *
+ * So call it in a preload, and pass bun `--timeout` of the same milliseconds,
+ * so that plain tests and hooks in the later files of a process keep it too.
+ * A call at the top of a file outlives that file for the runners wherever
+ * bun runs several files in one process.
  */
 export const setDefaultTimeout = (milliseconds: number): void => {
   defaultTimeout = milliseconds;
@@ -70,6 +77,24 @@ export const setDefaultTimeout = (milliseconds: number): void => {
 // Real time: a test's fake timers never move the runner's deadline.
 const { setTimeout: startTimer, clearTimeout: stopTimer } = globalThis;
 
+/** The longest delay `setTimeout` holds; it fires a longer one at once. */
+const LONGEST_TIMER = 2_147_483_647;
+
+const U32_MAX = 4_294_967_295;
+
+/**
+ * The milliseconds the runner's timer waits for a test bun gives `timeout`,
+ * or none. Bun casts a timeout to a u32, saturating: NaN and anything under
+ * 1 become 0, which is no deadline, and anything past `U32_MAX` becomes it.
+ * Past `LONGEST_TIMER` the runner starts no timer, and the test runs on as
+ * it did before 0.5.0.
+ */
+const timerMilliseconds = (timeout: number | undefined): number | undefined => {
+  if (timeout === undefined || Number.isNaN(timeout)) return undefined;
+  const milliseconds = Math.min(Math.max(Math.trunc(timeout), 0), U32_MAX);
+  return milliseconds > 0 && milliseconds <= LONGEST_TIMER ? milliseconds : undefined;
+};
+
 const never = new Promise<void>(() => {});
 
 /**
@@ -78,32 +103,44 @@ const never = new Promise<void>(() => {});
  * browsers, child processes) instead of running on beside later tests.
  *
  * - A test bun runs alone: the test's `onTestFinished` hook interrupts the
- *   fiber, and bun waits for its finalizers before the next test starts.
+ *   fiber, and bun waits for its finalizers before the next test starts, for
+ *   up to the test's own `deadline` (bun's default when it has none).
  * - A concurrent test, where bun refuses the hook (it cannot tell which test
  *   is running): the runner races the fiber against `deadline` in real time,
- *   the test's own timeout, which it handed bun, and interrupts it there. Bun
- *   does not wait for those finalizers; they run beside the tests still
- *   running. With no deadline (bun's `--timeout` alone), the fiber runs on,
- *   as it did before 0.5.0.
+ *   the test's own timeout, which it handed bun, and interrupts it there. Its
+ *   clock starts when bun enters the test, as bun's does: before the effect
+ *   is made and before its synchronous start runs. Bun does not wait for
+ *   those finalizers; they run beside the tests still running. With no
+ *   deadline the runner can time (bun's `--timeout` alone, or a timeout
+ *   `setTimeout` cannot hold), the fiber runs on, as it did before 0.5.0.
  *
  * Once the test has ended, its promise never settles: bun reports the
  * timeout, and whatever the interrupted fiber does after is not a result.
  */
-const run = <E>(effect: Effect.Effect<void, E>, deadline: number | undefined): Promise<void> => {
+const run = <E>(
+  effect: () => Effect.Effect<void, E>,
+  deadline: number | undefined,
+): Promise<void> => {
   let ended = false;
+  let fiber: Fiber.RuntimeFiber<void, E> | undefined;
+  const end = () => {
+    ended = true;
+    return fiber === undefined ? undefined : Effect.runPromise(Fiber.interrupt(fiber));
+  };
   let hooked = true;
   try {
-    onTestFinished(() => end());
+    onTestFinished(() => end(), deadline);
   } catch {
     hooked = false;
   }
-  const fiber = Effect.runFork(effect);
-  const end = () => {
-    ended = true;
-    return Effect.runPromise(Fiber.interrupt(fiber));
-  };
-  const timer =
-    !hooked && deadline !== undefined && deadline > 0 ? startTimer(end, deadline) : undefined;
+  const milliseconds = hooked ? undefined : timerMilliseconds(deadline);
+  const timer = milliseconds === undefined ? undefined : startTimer(end, milliseconds);
+  try {
+    fiber = Effect.runFork(effect());
+  } catch (error) {
+    stopTimer(timer);
+    throw error;
+  }
   return Effect.runPromise(Fiber.join(fiber)).then(
     () => {
       stopTimer(timer);
@@ -125,7 +162,7 @@ const register =
   (test: typeof bunTest) =>
   <E>(name: string, effect: () => Effect.Effect<void, E>, timeout: number | undefined): void => {
     const deadline = timeout ?? defaultTimeout;
-    test(name, () => run(effect(), deadline), deadline);
+    test(name, () => run(effect, deadline), deadline);
   };
 
 const asTest = register(bunTest);

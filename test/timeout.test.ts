@@ -72,6 +72,46 @@ for (const entry of ENTRIES)
       expect(result.broken).toEqual([]);
     });
 
+    test("a timed-out test's finalizers have its own timeout to run in, not bun's default", async () => {
+      // bun's default (30 ms) is shorter than a release (50 ms); each test's own is 200 ms.
+      const result = await run(entry, "./times-out.ts", { args: ["--timeout", "30"] });
+      expect(result.exitCode).toBe(1);
+      expect(result.ordered).toEqual(
+        ["scoped", "effect", "scopedLive", "live"].flatMap((name) => [
+          `acquired ${name}`,
+          `released ${name}`,
+          `(fail) a test bun times out > ${name}`,
+          `ran after ${name}`,
+        ]),
+      );
+      expect(result.broken).toEqual([]);
+    });
+
+    test("in one process, bun keeps setDefaultTimeout's ms for the first file only; with --timeout of the same ms, every test has it", async () => {
+      const twoFiles = (args: ReadonlyArray<string>) =>
+        run(entry, "./b.ts", {
+          dir: "two-files",
+          args: ["--preload", "./preload.ts", ...args, "./a.ts"],
+        });
+      const [preloadAlone, paired] = await Promise.all([
+        twoFiles([]),
+        twoFiles(["--timeout", "200"]),
+      ]);
+      // The later file's plain test has bun's 5 s default; the runner tests, the preload's 200 ms.
+      expect(preloadAlone.failed).toEqual([
+        "(fail) a: plain",
+        "(fail) a: runner",
+        "(fail) b: runner",
+      ]);
+      expect(preloadAlone.passed).toBe(1);
+      expect(paired.failed).toEqual([
+        "(fail) a: plain",
+        "(fail) a: runner",
+        "(fail) b: plain",
+        "(fail) b: runner",
+      ]);
+    });
+
     test("every runner passes in a file bun runs concurrently, and a failure still fails", async () => {
       const result = await run(entry, "./passes.ts", { dir: "concurrent" });
       expect(result.broken).toEqual([]);
@@ -87,6 +127,24 @@ for (const entry of ENTRIES)
       expect(result.failed).toEqual(timedOut("a concurrent test bun times out"));
       expect(result.released).toBe(ALL_RELEASED);
       expect(result.passed).toBe(1);
+    });
+
+    test("a concurrent test whose timeout bun reads as none (under 1 ms) or as its longest (past setTimeout's range) passes, as on 0.4.0", async () => {
+      const result = await run(entry, "./out-of-range.ts", { dir: "concurrent" });
+      expect(result.exitCode).toBe(0);
+      expect(result.broken).toEqual([]);
+      expect(result.failed).toEqual([]);
+      expect(result.passed).toBe(5);
+      expect(result.lines).not.toContain("hung");
+    });
+
+    test("a concurrent test is interrupted on the clock bun starts when it enters the test, synchronous work included", async () => {
+      const result = await run(entry, "./sync-prefix.ts", { dir: "concurrent" });
+      expect(result.broken).toEqual([]);
+      expect(result.failed).toEqual([
+        "(fail) a concurrent test with a synchronous prefix > prefix",
+      ]);
+      expect(result.released).toBe("released by then: prefix");
     });
 
     test("a concurrent test under bun's --timeout alone runs on as it did in 0.4.0", async () => {
