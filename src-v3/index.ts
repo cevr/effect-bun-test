@@ -137,9 +137,8 @@ const run = <E>(
   const timer = milliseconds === undefined ? undefined : startTimer(end, milliseconds);
   try {
     fiber = Effect.runFork(effect());
-  } catch (error) {
-    stopTimer(timer);
-    throw error;
+  } finally {
+    if (fiber === undefined) stopTimer(timer);
   }
   return Effect.runPromise(Fiber.join(fiber)).then(
     () => {

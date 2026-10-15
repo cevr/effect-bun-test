@@ -147,6 +147,12 @@ for (const entry of ENTRIES)
       expect(result.released).toBe("released by then: prefix");
     });
 
+    test("a thunk that throws is reported at its own line, not the runner's", async () => {
+      const result = await run(entry, "./thunk-throws.ts");
+      expect(result.failed).toEqual(["(fail) a thunk that throws > throws"]);
+      expect(result.lines.some((line) => /thunk-throws\.ts:7:\d+/.test(line))).toBe(true);
+    });
+
     test("a concurrent test under bun's --timeout alone runs on as it did in 0.4.0", async () => {
       const result = await run(entry, "./no-deadline.ts", {
         dir: "concurrent",
