@@ -80,14 +80,20 @@ child processes) instead of running on beside the tests after it. Deadlines
 are in real time: the `TestClock` an `it.effect` test runs on never moves
 them. How the fiber is interrupted depends on how bun runs the test:
 
-| The test                                                                                                                                                | Interrupted                                                                                      | Its finalizers                                                 |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | -------------------------------------------------------------- |
-| Runs alone: a plain file, `test.serial`, a runner's `.serial` form                                                                                      | When bun ends it, by the test's `onTestFinished` hook; the deadline is bun's, however it was set | Run before the next test starts                                |
-| Concurrent (`concurrentTestGlob`, `describe.concurrent`, `--concurrent`), with a deadline the runner holds: its `timeout`, or `setDefaultTimeout` below | At that deadline, by the runner's own timer (bun refuses `onTestFinished` in a concurrent test)  | Run beside the tests still running; bun does not wait for them |
-| Concurrent, under bun's `--timeout` alone                                                                                                               | Not interrupted: a test cannot read `--timeout`, so the fiber runs on, as before 0.5.0           | Never run                                                      |
+| The test                                                                                                                                                                                        | Interrupted                                                                                                                            | Its finalizers                                                                                                              |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Runs alone: a plain file, `test.serial`, a runner's `.serial` form                                                                                                                              | When bun ends it, by the test's `onTestFinished` hook; the deadline is bun's, however it was set                                       | Run before the next test starts, for up to the test's own timeout (bun's default when it has none); past that, bun moves on |
+| Concurrent (`concurrentTestGlob`, `describe.concurrent`, `--concurrent`), with a deadline the runner holds: its `timeout`, or `setDefaultTimeout` below                                         | At that deadline, by the runner's own timer, counted from when bun enters the test (bun refuses `onTestFinished` in a concurrent test) | Run beside the tests still running; bun does not wait for them                                                              |
+| Concurrent, under any deadline the runner does not hold: bun's 5 s default, `bun:test`'s own `setDefaultTimeout`, `--timeout` alone; or a timeout past 2³¹−1 ms, which `setTimeout` cannot hold | Not interrupted by its timeout: a test cannot read bun's deadline, so the fiber runs on, as before 0.5.0                               | Run when the fiber ends on its own                                                                                          |
+
+A timeout under 1 ms (or `NaN`) is no deadline, to bun and to the runner
+alike. Once a test has ended its promise never settles: bun has reported the
+timeout, and a late failure of the interrupted fiber is not reported again.
+Requires bun 1.3.2 or later.
 
 So in a concurrent file, set the default timeout with this package's
-`setDefaultTimeout` instead of `--timeout`:
+`setDefaultTimeout`, in a preload, and pass bun `--timeout` of the same
+milliseconds:
 
 ```ts
 // preload.ts, named in bunfig.toml's [test] preload
@@ -96,14 +102,29 @@ import { setDefaultTimeout } from "effect-bun-test";
 setDefaultTimeout(20_000);
 ```
 
-It sets bun's default too, and the runners hand bun the same deadline they
-race, so the two never differ. Once a test has ended its promise never
-settles: bun has reported the timeout, and a late failure of the interrupted
-fiber is not reported again. Requires bun 1.3.2 or later.
+```sh
+bun test --timeout 20000
+```
+
+The call sets two things, which last differently:
+
+- **The runners' deadline** lasts for the rest of the process. The runners
+  hand bun that same number for each test they register, so for a runner
+  test bun's deadline and the runner's are one.
+- **Bun's default** (`setDefaultTimeout` from `bun:test`) lasts for the
+  current file only. Where bun runs several files in one process (its
+  default, or `--no-isolate`), it resets its default after each file, so
+  plain `test(...)` calls and hooks in the later files fall back to
+  `--timeout`, else 5 s. A `--timeout` of the same milliseconds keeps them
+  on it.
+
+For the same reason a call at the top of a file outlives that file for the
+runners: in a shared process, every runner test in the files after it gets
+its deadline too. The preload is the place for it.
 
 ### Utilities
 
-- `setDefaultTimeout(ms)` - The default timeout of the tests registered after it: bun's, and the deadline the runners hold
+- `setDefaultTimeout(ms)` - The default timeout of the tests registered after it: the deadline the runners hold, for the process, and bun's, for the current file (pair it with `--timeout <ms>`)
 - `yieldFibers` - Yield to allow forked fibers to process (use after `fork` or `send`)
 - `describe`, `test`, `expect` - Re-exported from `bun:test`
 
