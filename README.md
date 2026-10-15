@@ -67,6 +67,14 @@ describe("my feature", () => {
 | `it.live`       |             |       | Real clock tests              |
 | `it.scopedLive` |             | ✓     | Real clock + resource cleanup |
 
+Every runner runs the test's effect on a fiber of its own. When bun ends the
+test, a timeout included, the fiber is interrupted and its finalizers run
+before the next test starts: a test that times out closes its scope (its
+servers, browsers, child processes) instead of running on beside the tests
+after it. The deadline is bun's own, in real time, however it was set (the
+test's `timeout` argument, `--timeout`, `setDefaultTimeout`), so the
+`TestClock` an `it.effect` test runs on never moves it.
+
 ### Utilities
 
 - `yieldFibers` - Yield to allow forked fibers to process (use after `fork` or `send`)

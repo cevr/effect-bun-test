@@ -41,10 +41,32 @@
  * @module
  */
 import type { Scope, TestServices } from "effect";
-import { Effect, Layer, TestContext } from "effect";
-import { describe as bunDescribe, expect, test as bunTest } from "bun:test";
+import { Effect, Fiber, Layer, TestContext } from "effect";
+import { describe as bunDescribe, expect, onTestFinished, test as bunTest } from "bun:test";
 
 type TestEnv = TestServices.TestServices;
+
+/**
+ * Run a test's effect on a fiber of its own. When bun ends the test, its
+ * timeout included, the test's finished hook interrupts the fiber and waits
+ * for its finalizers, so a test that timed out closes its scope before the
+ * next test starts. The deadline is bun's own, in real time, whatever set it
+ * (the test's `timeout`, `--timeout`, `setDefaultTimeout`); the TestClock a
+ * test runs on never moves it. A fiber already done is left as it is. Once
+ * the hook has interrupted it, the test's promise settles quietly: bun has
+ * reported the timeout, and a late failure would show as one between tests.
+ */
+const run = <E>(effect: Effect.Effect<void, E>): Promise<void> => {
+  const fiber = Effect.runFork(effect);
+  let ended = false;
+  onTestFinished(async () => {
+    ended = true;
+    await Effect.runPromise(Fiber.interrupt(fiber));
+  });
+  return Effect.runPromise(Fiber.join(fiber)).catch((error: unknown) => {
+    if (!ended) throw error;
+  });
+};
 
 /**
  * Yield to allow forked fibers to process.
@@ -78,21 +100,14 @@ export const it = {
    */
   effect: Object.assign(
     <E>(name: string, fn: () => Effect.Effect<void, E, TestEnv>, timeout?: number) =>
-      bunTest(
-        name,
-        () => Effect.runPromise(fn().pipe(Effect.provide(TestContext.TestContext))),
-        timeout,
-      ),
+      bunTest(name, () => run(fn().pipe(Effect.provide(TestContext.TestContext))), timeout),
     {
       layer:
         <ROut, EL>(layer: Layer.Layer<ROut, EL>): LayeredTest<ROut | TestEnv> =>
         (name, fn, timeout) =>
           bunTest(
             name,
-            () =>
-              Effect.runPromise(
-                fn().pipe(Effect.provide(Layer.merge(TestContext.TestContext, layer))),
-              ),
+            () => run(fn().pipe(Effect.provide(Layer.merge(TestContext.TestContext, layer)))),
             timeout,
           ),
     },
@@ -106,7 +121,7 @@ export const it = {
     <E>(name: string, fn: () => Effect.Effect<void, E, TestEnv | Scope.Scope>, timeout?: number) =>
       bunTest(
         name,
-        () => Effect.runPromise(fn().pipe(Effect.scoped, Effect.provide(TestContext.TestContext))),
+        () => run(fn().pipe(Effect.scoped, Effect.provide(TestContext.TestContext))),
         timeout,
       ),
     {
@@ -116,7 +131,7 @@ export const it = {
           bunTest(
             name,
             () =>
-              Effect.runPromise(
+              run(
                 fn().pipe(
                   Effect.scoped,
                   Effect.provide(Layer.merge(TestContext.TestContext, layer)),
@@ -133,12 +148,12 @@ export const it = {
    */
   live: Object.assign(
     <E>(name: string, fn: () => Effect.Effect<void, E, never>, timeout?: number) =>
-      bunTest(name, () => Effect.runPromise(fn()), timeout),
+      bunTest(name, () => run(fn()), timeout),
     {
       layer:
         <ROut, EL>(layer: Layer.Layer<ROut, EL>): LayeredTest<ROut> =>
         (name, fn, timeout) =>
-          bunTest(name, () => Effect.runPromise(fn().pipe(Effect.provide(layer))), timeout),
+          bunTest(name, () => run(fn().pipe(Effect.provide(layer))), timeout),
     },
   ),
 
@@ -148,16 +163,12 @@ export const it = {
    */
   scopedLive: Object.assign(
     <E>(name: string, fn: () => Effect.Effect<void, E, Scope.Scope>, timeout?: number) =>
-      bunTest(name, () => Effect.runPromise(fn().pipe(Effect.scoped)), timeout),
+      bunTest(name, () => run(fn().pipe(Effect.scoped)), timeout),
     {
       layer:
         <ROut, EL>(layer: Layer.Layer<ROut, EL>): LayeredTest<ROut | Scope.Scope> =>
         (name, fn, timeout) =>
-          bunTest(
-            name,
-            () => Effect.runPromise(fn().pipe(Effect.scoped, Effect.provide(layer))),
-            timeout,
-          ),
+          bunTest(name, () => run(fn().pipe(Effect.scoped, Effect.provide(layer))), timeout),
     },
   ),
 };
