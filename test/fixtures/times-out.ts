@@ -1,9 +1,11 @@
 // Run by `test/timeout.test.ts` as a test file of its own (`bun test` finds
 // no `*.test.ts` here, so the suite does not run it directly). Each case
 // takes a resource whose release says so, then never ends, so bun times it
-// out; the case after each says it ran. Each says it on stderr, where bun
-// reports, so the order of the two reads in one stream. A release takes
-// 50 ms of real time, so bun is seen to wait for asynchronous cleanup.
+// out; the case after each says it ran, with a timeout of its own, so a
+// `--timeout` given to the run bounds only the hook that waits for a
+// release. Each says it on stderr, where bun reports, so the order of the
+// two reads in one stream. A release takes 50 ms of real time, so bun is
+// seen to wait for asynchronous cleanup.
 import { Effect } from "effect";
 import { describe, it } from "./entry.js";
 
@@ -19,7 +21,7 @@ const held = (name: string) =>
 
 describe("a test bun times out", () => {
   it.scoped("scoped", () => Effect.andThen(held("scoped"), Effect.never), 200);
-  it.scoped("after scoped", () => say("ran after scoped"));
+  it.scoped("after scoped", () => say("ran after scoped"), 1000);
 
   // The TestClock never moves on its own: only bun's real-time deadline ends this one.
   it.effect(
@@ -27,11 +29,11 @@ describe("a test bun times out", () => {
     () => Effect.scoped(Effect.andThen(held("effect"), Effect.sleep("1 hour"))),
     200,
   );
-  it.effect("after effect", () => say("ran after effect"));
+  it.effect("after effect", () => say("ran after effect"), 1000);
 
   it.scopedLive("scopedLive", () => Effect.andThen(held("scopedLive"), Effect.never), 200);
-  it.live("after scopedLive", () => say("ran after scopedLive"));
+  it.live("after scopedLive", () => say("ran after scopedLive"), 1000);
 
   it.live("live", () => Effect.scoped(Effect.andThen(held("live"), Effect.never)), 200);
-  it.live("after live", () => say("ran after live"));
+  it.live("after live", () => say("ran after live"), 1000);
 });
