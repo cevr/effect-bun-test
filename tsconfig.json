@@ -22,7 +22,7 @@
           // Enable rules that are off by default
           "anyUnknownInErrorContext": "error",
           "deterministicKeys": "warning",
-          "importFromBarrel": "warning",
+          "preferBarrelImport": "warning",
           "instanceOfSchema": "warning",
           "missedPipeableOpportunity": "warning",
           "missingEffectServiceDependency": "warning",
@@ -37,7 +37,7 @@
           "effectMapVoid": "warning",
           "effectSucceedWithVoid": "warning",
           "leakingRequirements": "warning",
-          "preferSchemaOverJson": "warning",
+          "globalJsonInEffect": "warning",
           "redundantSchemaTagIdentifier": "warning",
           "returnEffectInGen": "warning",
           "runEffectInsideEffect": "error",
@@ -49,6 +49,7 @@
           "unnecessaryPipe": "warning",
           "unnecessaryPipeChain": "warning"
         },
+        "barrelImportPackages": ["effect"],
         "keyPatterns": [
           {
             "target": "service",
