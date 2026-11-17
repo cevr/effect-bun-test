@@ -36,15 +36,15 @@
   "devDependencies": {
     "@changesets/changelog-github": "^1.0.1",
     "@changesets/cli": "^3.0.3",
-    "@effect/language-service": "^0.87.3",
+    "@effect/language-service": "^0.87.5",
     "@types/bun": "latest",
-    "concurrently": "^9.2.1",
-    "effect": "4.1.2",
-    "effect-v3": "npm:effect@^3.19.15",
-    "lefthook": "^2.0.15",
-    "oxfmt": "^0.26.0",
-    "oxlint": "^1.41.0",
-    "typescript": "^5.9.3"
+    "concurrently": "^10.0.7",
+    "effect": "4.1.4",
+    "effect-v3": "npm:effect@^3.22.4",
+    "lefthook": "^2.2.2",
+    "oxfmt": "^0.79.0",
+    "oxlint": "^1.94.0",
+    "typescript": "^6.0.3"
   },
   "peerDependencies": {
     "bun": ">=1.3.2",
